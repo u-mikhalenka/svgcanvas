@@ -21,16 +21,6 @@ export default (function () {
 
   var STYLES, Context, CanvasGradient, CanvasPattern, namedEntities;
 
-  //helper function to format a string
-  function format(str, args) {
-    var keys = Object.keys(args),
-      i;
-    for (i = 0; i < keys.length; i++) {
-      str = str.replace(new RegExp('\\{' + keys[i] + '\\}', 'gi'), args[keys[i]]);
-    }
-    return str;
-  }
-
   //helper function that generates a random string
   function randomString(holder) {
     var chars, randomstring, i;
@@ -71,7 +61,13 @@ export default (function () {
   //helper function to map canvas-textAlign to svg-textAnchor
   function getTextAnchor(textAlign) {
     //TODO: support rtl languages
-    var mapping = { left: 'start', right: 'end', center: 'middle', start: 'start', end: 'end' };
+    var mapping = {
+      left: 'start',
+      right: 'end',
+      center: 'middle',
+      start: 'start',
+      end: 'end',
+    };
     return mapping[textAlign] || mapping.start;
   }
 
@@ -215,10 +211,7 @@ export default (function () {
       //separate alpha value, since webkit can't handle it
       regex = /rgba\(\s*(\d*\.?\d+)\s*,\s*(\d*\.?\d+)\s*,\s*(\d*\.?\d+)\s*,\s*(\d?\.?\d*)\s*\)/gi;
       matches = regex.exec(color);
-      stop.setAttribute(
-        'stop-color',
-        format('rgb({r},{g},{b})', { r: matches[1], g: matches[2], b: matches[3] }),
-      );
+      stop.setAttribute('stop-color', `rgb(${matches[1]},${matches[2]},${matches[3]})`);
       stop.setAttribute('stop-opacity', matches[4]);
     } else {
       stop.setAttribute('stop-color', utils.toString(color));
@@ -448,16 +441,10 @@ export default (function () {
               this.__defs.appendChild(node);
             }
           }
-          currentElement.setAttribute(
-            style.apply,
-            format('url(#{id})', { id: value.__root.getAttribute('id') }),
-          );
+          currentElement.setAttribute(style.apply, `url(#${value.__root.getAttribute('id')})`);
         } else if (value instanceof CanvasGradient) {
           //gradient
-          currentElement.setAttribute(
-            style.apply,
-            format('url(#{id})', { id: value.__root.getAttribute('id') }),
-          );
+          currentElement.setAttribute(style.apply, `url(#${value.__root.getAttribute('id')})`);
         } else if (style.apply.indexOf(type) !== -1 && style.svg !== value) {
           if (
             (style.svgAttr === 'stroke' || style.svgAttr === 'fill') &&
@@ -470,7 +457,7 @@ export default (function () {
             matches = regex.exec(value);
             currentElement.setAttribute(
               style.svgAttr,
-              format('rgb({r},{g},{b})', { r: matches[1], g: matches[2], b: matches[3] }),
+              `rgb(${matches[1]},${matches[2]},${matches[3]})`,
             );
             //should take globalAlpha here
             var opacity = matches[4];
@@ -605,8 +592,10 @@ export default (function () {
 
     // Note that there is only one current default path, it is not part of the drawing state.
     // See also: https://html.spec.whatwg.org/multipage/scripting.html#current-default-path
-    this.__currentDefaultPath = '';
-    this.__currentPosition = {};
+    this.__currentDefaultPath = [];
+    this.__hasMoveCommand = false;
+    this.__currentPositionX = undefined;
+    this.__currentPositionY = undefined;
 
     path = this.__createElement('path', {}, true);
     parent = this.__closestGroupOrSvg();
@@ -621,7 +610,7 @@ export default (function () {
   Context.prototype.__applyCurrentDefaultPath = function () {
     var currentElement = this.__currentElement;
     if (currentElement.nodeName === 'path') {
-      currentElement.setAttribute('d', this.__currentDefaultPath);
+      currentElement.setAttribute('d', this.__currentDefaultPath.join(' '));
     } else {
       console.error('Attempted to apply path command to node', currentElement.nodeName);
     }
@@ -632,8 +621,8 @@ export default (function () {
    * @private
    */
   Context.prototype.__addPathCommand = function (command) {
-    this.__currentDefaultPath += ' ';
-    this.__currentDefaultPath += command;
+    this.__hasMoveCommand = this.__hasMoveCommand || command[0] === 'M';
+    this.__currentDefaultPath.push(command);
   };
 
   /**
@@ -646,20 +635,19 @@ export default (function () {
     }
 
     // creates a new subpath with the given point
-    this.__currentPosition = { x: x, y: y };
-    this.__addPathCommand(
-      format('M {x} {y}', {
-        x: this.__matrixTransform(x, y).x,
-        y: this.__matrixTransform(x, y).y,
-      }),
-    );
+    this.__currentPositionX = x;
+    this.__currentPositionY = y;
+    if (!this.__transformMatrix.isIdentity) {
+      ({ x, y } = this.__matrixTransform(x, y));
+    }
+    this.__addPathCommand(`M ${x} ${y}`);
   };
 
   /**
    * Closes the current path
    */
   Context.prototype.closePath = function () {
-    if (this.__currentDefaultPath) {
+    if (this.__currentDefaultPath && this.__currentDefaultPath.length > 0) {
       this.__addPathCommand('Z');
     }
   };
@@ -668,21 +656,15 @@ export default (function () {
    * Adds a line to command
    */
   Context.prototype.lineTo = function (x, y) {
-    this.__currentPosition = { x: x, y: y };
-    if (this.__currentDefaultPath.indexOf('M') > -1) {
-      this.__addPathCommand(
-        format('L {x} {y}', {
-          x: this.__matrixTransform(x, y).x,
-          y: this.__matrixTransform(x, y).y,
-        }),
-      );
+    this.__currentPositionX = x;
+    this.__currentPositionY = y;
+    if (!this.__transformMatrix.isIdentity) {
+      ({ x, y } = this.__matrixTransform(x, y));
+    }
+    if (this.__hasMoveCommand) {
+      this.__addPathCommand(`L ${x} ${y}`);
     } else {
-      this.__addPathCommand(
-        format('M {x} {y}', {
-          x: this.__matrixTransform(x, y).x,
-          y: this.__matrixTransform(x, y).y,
-        }),
-      );
+      this.__addPathCommand(`M ${x} ${y}`);
     }
   };
 
@@ -690,32 +672,23 @@ export default (function () {
    * Add a bezier command
    */
   Context.prototype.bezierCurveTo = function (cp1x, cp1y, cp2x, cp2y, x, y) {
-    this.__currentPosition = { x: x, y: y };
-    this.__addPathCommand(
-      format('C {cp1x} {cp1y} {cp2x} {cp2y} {x} {y}', {
-        cp1x: this.__matrixTransform(cp1x, cp1y).x,
-        cp1y: this.__matrixTransform(cp1x, cp1y).y,
-        cp2x: this.__matrixTransform(cp2x, cp2y).x,
-        cp2y: this.__matrixTransform(cp2x, cp2y).y,
-        x: this.__matrixTransform(x, y).x,
-        y: this.__matrixTransform(x, y).y,
-      }),
-    );
+    this.__currentPositionX = x;
+    this.__currentPositionY = y;
+    const cp1xy = this.__matrixTransform(cp1x, cp1y);
+    const cp2xy = this.__matrixTransform(cp2x, cp2y);
+    const xy = this.__matrixTransform(x, y);
+    this.__addPathCommand(`C ${cp1xy.x} ${cp1xy.y} ${cp2xy.x} ${cp2xy.y} ${xy.x} ${xy.y}`);
   };
 
   /**
    * Adds a quadratic curve to command
    */
   Context.prototype.quadraticCurveTo = function (cpx, cpy, x, y) {
-    this.__currentPosition = { x: x, y: y };
-    this.__addPathCommand(
-      format('Q {cpx} {cpy} {x} {y}', {
-        cpx: this.__matrixTransform(cpx, cpy).x,
-        cpy: this.__matrixTransform(cpx, cpy).y,
-        x: this.__matrixTransform(x, y).x,
-        y: this.__matrixTransform(x, y).y,
-      }),
-    );
+    this.__currentPositionX = x;
+    this.__currentPositionY = y;
+    const cpxy = this.__matrixTransform(cpx, cpy);
+    const xy = this.__matrixTransform(x, y);
+    this.__addPathCommand(`Q ${cpxy.x} ${cpxy.y} ${xy.x} ${xy.y}`);
   };
 
   /**
@@ -733,8 +706,8 @@ export default (function () {
    */
   Context.prototype.arcTo = function (x1, y1, x2, y2, radius) {
     // Let the point (x0, y0) be the last point in the subpath.
-    var x0 = this.__currentPosition && this.__currentPosition.x;
-    var y0 = this.__currentPosition && this.__currentPosition.y;
+    var x0 = this.__currentPositionX;
+    var y0 = this.__currentPositionY;
 
     // First ensure there is a subpath for (x1, y1).
     if (typeof x0 == 'undefined' || typeof y0 == 'undefined') {
@@ -1107,19 +1080,16 @@ export default (function () {
     var scaleY = Math.hypot(this.__transformMatrix.c, this.__transformMatrix.d);
 
     this.lineTo(startX, startY);
+    const ttrx = radius * scaleX;
+    const ttry = radius * scaleY;
+    const xAxisRotation = 0;
+    const endxy = this.__matrixTransform(endX, endY);
     this.__addPathCommand(
-      format('A {rx} {ry} {xAxisRotation} {largeArcFlag} {sweepFlag} {endX} {endY}', {
-        rx: radius * scaleX,
-        ry: radius * scaleY,
-        xAxisRotation: 0,
-        largeArcFlag: largeArcFlag,
-        sweepFlag: sweepFlag,
-        endX: this.__matrixTransform(endX, endY).x,
-        endY: this.__matrixTransform(endX, endY).y,
-      }),
+      `A ${ttrx} ${ttry} ${xAxisRotation} ${largeArcFlag} ${sweepFlag} ${endxy.x} ${endxy.y}`,
     );
 
-    this.__currentPosition = { x: endX, y: endY };
+    this.__currentPositionX = endX;
+    this.__currentPositionY = endY;
   };
 
   /**
@@ -1189,19 +1159,13 @@ export default (function () {
     this.lineTo(startX, startY);
     this.__transformMatrix = currentTransform;
 
+    const xAxisRotation = rotation * (180 / Math.PI);
     this.__addPathCommand(
-      format('A {rx} {ry} {xAxisRotation} {largeArcFlag} {sweepFlag} {endX} {endY}', {
-        rx: radiusX,
-        ry: radiusY,
-        xAxisRotation: rotation * (180 / Math.PI),
-        largeArcFlag: largeArcFlag,
-        sweepFlag: sweepFlag,
-        endX: endX,
-        endY: endY,
-      }),
+      `A ${radiusX} ${radiusY} ${xAxisRotation} ${largeArcFlag} ${sweepFlag} ${endX} ${endY}`,
     );
 
-    this.__currentPosition = { x: endX, y: endY };
+    this.__currentPositionX = endX;
+    this.__currentPositionY = endY;
   };
 
   /**
@@ -1221,7 +1185,7 @@ export default (function () {
     this.__defs.appendChild(clipPath);
 
     //set the clip path to this group
-    group.setAttribute('clip-path', format('url(#{id})', { id: id }));
+    group.setAttribute('clip-path', `url(#${id})`);
 
     //clip paths can be scaled and transformed, we need to add another wrapper group to avoid later transformations
     // to this path
