@@ -1,8 +1,9 @@
 {
   "name": "svgcanvas",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "svgcanvas",
-  "main": "dist/svgcanvas.js",
+  "module": "dist/svgcanvas.esm.js",
+  "types": "types/index.d.ts",
   "scripts": {
     "watch": "rollup -c -w",
     "build": "rollup -c",
@@ -12,14 +13,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/zenozeng/svgcanvas.git"
+    "url": "https://github.com/u-mikhalenka/svgcanvas.git"
   },
   "keywords": [
     "canvas",
     "svg",
     "canvas2svg"
   ],
-  "author": "Zeno Zeng",
+  "author": "Uladzimir Mikhalenka",
   "license": "MIT",
   "devDependencies": {
     "prettier": "3.2.5",
